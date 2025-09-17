@@ -6,7 +6,7 @@ import io
 
 # TensorFlow Model Prediction
 def model_prediction(test_image):
-    model = tf.keras.models.load_model(r"C:\Users\HIMANSHU PATHAK\Documents\project\Plant-Disease-Detection\trained_model.keras")
+    model = tf.keras.models.load_model(r"C:\Users\chava\OneDrive\Desktop\PDD\Plant-Disease-Detection\trained_model.keras")
     image= tf.keras.preprocessing.image.load_img(test_image,target_size=(128,128))
     input_arr =tf.keras.preprocessing.image.img_to_array(image)
     input_arr=np.array([input_arr])
@@ -49,8 +49,8 @@ st.sidebar.button("Disease Recognition", on_click=handle_click,args=("Disease Re
 if (st.session_state.app_mode == "Home"):
 
     st.header("PLANT DISEASE RECOGNITION SYSTEM")
-    image_path = r"C:\Users\HIMANSHU PATHAK\Documents\project\Plant-Disease-Detection\test\profile.jpg"
-    st.image(image_path, use_column_width=True)
+    # image_path ="C:\Users\HIMANSHU PATHAK\Documents\project\Plant-Disease-Detection\test\profile.jpg"
+    # st.image(image_path, use_column_width=True)
     st.markdown("""
     Welcome to the Plant Disease Recognition System! 🌿🔍
 
