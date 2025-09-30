@@ -1,6 +1,7 @@
 import streamlit as st
 import tensorflow as tf
 import os
+import requests
 import traceback
 import numpy as np
 from PIL import Image
@@ -13,6 +14,25 @@ translator = GoogleTranslator()
 MODEL_FILENAME = "trained_model.keras"
 # Build an absolute path relative to this file so Streamlit's working dir won't break it
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), MODEL_FILENAME)
+# Optional model URL (can be set as env var MODEL_URL). Default: raw file from GitHub (public repo).
+DEFAULT_MODEL_URL = f"https://raw.githubusercontent.com/chavanarya36/PDD/main/{MODEL_FILENAME}"
+
+
+def download_model(url, dest_path):
+    """Stream-download a file and save to dest_path. Returns True on success."""
+    try:
+        print(f"Attempting to download model from: {url}")
+        resp = requests.get(url, stream=True, timeout=30)
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        print("Model download completed")
+        return True
+    except Exception as e:
+        print(f"Model download failed: {e}")
+        return False
 model = None
 model_load_error = None
 
@@ -22,8 +42,17 @@ def ensure_model_loaded():
     if model is not None or model_load_error is not None:
         return
     if not os.path.exists(MODEL_PATH):
-        model_load_error = f"Model file not found at: {os.path.abspath(MODEL_PATH)}"
-        return
+        # Try to fetch the model automatically if a URL is provided via env or fallback to raw GitHub URL
+        model_url = os.environ.get("MODEL_URL", DEFAULT_MODEL_URL)
+        downloaded = False
+        try:
+            downloaded = download_model(model_url, MODEL_PATH)
+        except Exception:
+            downloaded = False
+
+        if not downloaded:
+            model_load_error = f"Model file not found at: {os.path.abspath(MODEL_PATH)} and automatic download failed (tried {model_url})."
+            return
     try:
         model = tf.keras.models.load_model(MODEL_PATH)
     except Exception:
