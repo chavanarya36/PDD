@@ -7,14 +7,19 @@ from PIL import Image
 from deep_translator import GoogleTranslator
 import base64
 
-# Translation Function with caching for performance
+# Translation helpers: cache translator instance and translated strings
+@st.cache_resource(show_spinner=False)
+def get_translator(target_language: str):
+    """Cache and return a GoogleTranslator instance per target language."""
+    return GoogleTranslator(source='en', target=target_language)
+
 @st.cache_data(show_spinner=False)
 def translate_text(text, target_language):
-    """Translate text to target language using Google Translator"""
+    """Translate text to target language using a cached translator (fast)."""
     if target_language == 'en' or not text:
         return text
     try:
-        translator = GoogleTranslator(source='en', target=target_language)
+        translator = get_translator(target_language)
         return translator.translate(text)
     except Exception as e:
         # If translation fails, return original text
@@ -370,6 +375,12 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), MODEL_FILE
 model = None
 model_load_error = None
 
+@st.cache_resource(show_spinner=False)
+def load_model_cached(model_path: str):
+    """Load and cache the Keras model once across reruns and sessions."""
+    # compile=False speeds up loading and avoids optimizer deserialization warnings
+    return tf.keras.models.load_model(model_path, compile=False)
+
 def ensure_model_loaded():
     """Try to load the model once and populate model or model_load_error."""
     global model, model_load_error
@@ -379,7 +390,8 @@ def ensure_model_loaded():
         model_load_error = f"Model file not found at: {os.path.abspath(MODEL_PATH)}"
         return
     try:
-        model = tf.keras.models.load_model(MODEL_PATH)
+        # Use cached loader to avoid reloading on every rerun
+        model = load_model_cached(MODEL_PATH)
     except Exception:
         model = None
         model_load_error = traceback.format_exc()
@@ -467,6 +479,8 @@ def t(text):
 
 if 'app_mode' not in st.session_state:
     st.session_state.app_mode = "Home"
+if 'model_ready' not in st.session_state:
+    st.session_state.model_ready = False
 
 # Function to handle button clicks
 def handle_click(mode):
@@ -480,6 +494,26 @@ nav_buttons = {
 }
 
 st.sidebar.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
+# Model preload/status controls
+st.sidebar.markdown(f"<h3 style='text-align: center;'>🧠 {t('AI Model')}</h3>", unsafe_allow_html=True)
+preload_col1, preload_col2 = st.sidebar.columns([1, 1])
+with preload_col1:
+    if st.button(f"⚡ {t('Preload Model')}"):
+        with st.spinner(t('Loading AI model... First load may take up to 30–60 seconds')):
+            ensure_model_loaded()
+            st.session_state.model_ready = model is not None
+            if model is not None:
+                st.sidebar.success(t('Model loaded and ready'))
+            else:
+                st.sidebar.error(t('Model failed to load'))
+with preload_col2:
+    status = t('Ready') if st.session_state.model_ready and model is not None else t('Not Loaded')
+    badge_color = '#10b981' if status == t('Ready') else '#f59e0b'
+    st.sidebar.markdown(
+        f"<div style='text-align:center; padding:8px; border-radius:12px; border:1px solid rgba(255,255,255,0.1);'><strong>"+
+        t('Status')+f": </strong><span style='color:{badge_color}'>{status}</span></div>",
+        unsafe_allow_html=True,
+    )
 for page, icon in nav_buttons.items():
     if st.sidebar.button(f"{icon} {t(page)}", key=f"nav_{page}"):
         handle_click(page)
@@ -499,7 +533,8 @@ if st.session_state.app_mode == "Home":
     # Main image
     image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test', 'profile.jpg')
     if os.path.exists(image_path):
-        st.image(image_path, use_container_width=True)
+        # Replace deprecated use_container_width with width='stretch'
+        st.image(image_path, width='stretch')
     
     # Welcome message
     welcome_text = t('Together, let\'s protect our crops and ensure a healthier, greener harvest!')
@@ -709,18 +744,11 @@ elif st.session_state.app_mode == "Disease Recognition":
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # If model failed to load, show detailed error and stop
-    ensure_model_loaded()
-    if model is None:
-        st.markdown(f"""
-        <div class='card' style='border-left: 4px solid var(--error);'>
-            <h3 style='color: var(--error);'>⚠️ {t('Model Loading Error')}</h3>
-            <p>{t('The AI model failed to load. Please check the console for details.')}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if model_load_error:
-            st.code(model_load_error)
-        st.stop()
+    # Hint about first-run latency (defer heavy model load until analysis)
+    st.markdown(
+        f"<p style='text-align:center; color: var(--text-secondary);'>⏱️ {t('Note: The AI model loads on first analysis and may take up to 30–60 seconds the first time. Subsequent analyses are instant.')}</p>",
+        unsafe_allow_html=True,
+    )
 
     # Image preview
     if test_image is not None:
@@ -731,7 +759,8 @@ elif st.session_state.app_mode == "Disease Recognition":
         # Display image with custom styling
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.image(img, use_container_width=True)
+            # Replace deprecated use_container_width with width='stretch'
+            st.image(img, width='stretch')
         
         # Image info
         st.markdown(f"""
@@ -761,9 +790,22 @@ elif st.session_state.app_mode == "Disease Recognition":
             predict_button = st.button(f"🔍 {t('ANALYZE NOW')}", use_container_width=True)
         
         if predict_button:
-            # Loading animation
-            with st.spinner(t('🧬 Analyzing plant image...')):
+            # Loading animation and lazy model load
+            with st.spinner(t('� Loading AI model and analyzing... (first run may take up to 30–60 seconds)')):
                 st.snow()
+                # Ensure model is loaded only when actually needed
+                ensure_model_loaded()
+                if model is None:
+                    st.markdown(f"""
+                    <div class='card' style='border-left: 4px solid var(--error);'>
+                        <h3 style='color: var(--error);'>⚠️ {t('Model Loading Error')}</h3>
+                        <p>{t('The AI model failed to load. Please check the console for details.')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if model_load_error:
+                        st.code(model_load_error)
+                    st.stop()
+
                 predictions = model_prediction(test_image)
                 
                 if predictions is None:
